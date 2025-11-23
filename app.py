@@ -48,69 +48,82 @@ except Exception as e:
     st.stop()
 
 # ================= 工具函数：PDF 生成 =================
+# ================= 工具函数：PDF 生成 (防崩溃修复版) =================
 def create_pdf(invoice_data, items_df):
     pdf = FPDF()
     pdf.add_page()
+    
+    # --- 核心修复：定义一个清洗函数 ---
+    # 它的作用是：如果有中文，就自动变成 '?'，防止程序崩溃
+    # 如果您必须显示中文，需要上传字体文件 (比较复杂)，现在的方案是保住程序不崩
+    def clean(text):
+        if isinstance(text, str):
+            return text.encode('latin-1', 'replace').decode('latin-1')
+        return str(text)
+    # -------------------------------
+
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, "COMMERCIAL INVOICE / FACTURE", 0, 1, 'C')
+    pdf.cell(0, 10, clean("COMMERCIAL INVOICE / FACTURE"), 0, 1, 'C')
+    
     pdf.set_font("Arial", '', 10)
     
     pdf.ln(10)
-    pdf.cell(100, 5, "ISSUER: My French Trading SAS", 0, 0)
-    pdf.cell(90, 5, f"NO: {invoice_data['no']}", 0, 1, 'R')
-    pdf.cell(100, 5, "Address: 123 Rue de la Loi, Paris", 0, 0)
-    pdf.cell(90, 5, f"DATE: {invoice_data['date']}", 0, 1, 'R')
-    pdf.cell(100, 5, "SIRET: 888 999 000 | VAT: FR12888...", 0, 1)
+    pdf.cell(100, 5, clean("ISSUER: My French Trading SAS"), 0, 0)
+    pdf.cell(90, 5, clean(f"NO: {invoice_data['no']}"), 0, 1, 'R')
+    pdf.cell(100, 5, clean("Address: 123 Rue de la Loi, Paris"), 0, 0)
+    pdf.cell(90, 5, clean(f"DATE: {invoice_data['date']}"), 0, 1, 'R')
+    pdf.cell(100, 5, clean("SIRET: 888 999 000 | VAT: FR12888..."), 0, 1)
     
     pdf.ln(10)
     pdf.set_font("Arial", 'B', 10)
-    pdf.cell(0, 5, f"TO: {invoice_data['client_name']}", 0, 1)
+    # 这里使用了 clean() 包裹用户输入的内容
+    pdf.cell(0, 5, clean(f"TO: {invoice_data['client_name']}"), 0, 1)
     pdf.set_font("Arial", '', 10)
-    pdf.cell(0, 5, f"Address: {invoice_data['client_addr']}", 0, 1)
-    pdf.cell(0, 5, f"Client VAT: {invoice_data['client_vat']}", 0, 1)
+    pdf.cell(0, 5, clean(f"Address: {invoice_data['client_addr']}"), 0, 1)
+    pdf.cell(0, 5, clean(f"Client VAT: {invoice_data['client_vat']}"), 0, 1)
     
     pdf.ln(10)
     pdf.set_fill_color(200, 220, 255)
-    pdf.cell(30, 8, "SKU", 1, 0, 'C', True)
-    pdf.cell(80, 8, "Description", 1, 0, 'C', True)
-    pdf.cell(20, 8, "Qty", 1, 0, 'C', True)
-    pdf.cell(30, 8, "Unit Price", 1, 0, 'C', True)
-    pdf.cell(30, 8, "Total", 1, 1, 'C', True)
+    pdf.cell(30, 8, clean("SKU"), 1, 0, 'C', True)
+    pdf.cell(80, 8, clean("Description"), 1, 0, 'C', True)
+    pdf.cell(20, 8, clean("Qty"), 1, 0, 'C', True)
+    pdf.cell(30, 8, clean("Unit Price"), 1, 0, 'C', True)
+    pdf.cell(30, 8, clean("Total"), 1, 1, 'C', True)
     
     total_ht = 0
     for idx, row in items_df.iterrows():
         line_total = row['Quantity'] * row['Price']
         total_ht += line_total
-        pdf.cell(30, 8, str(row['SKU']), 1)
-        pdf.cell(80, 8, str(row['Desc']), 1)
-        pdf.cell(20, 8, str(row['Quantity']), 1, 0, 'C')
+        # 对每一行产品信息也进行清洗
+        pdf.cell(30, 8, clean(str(row['SKU'])), 1)
+        pdf.cell(80, 8, clean(str(row['Desc'])), 1)
+        pdf.cell(20, 8, clean(str(row['Quantity'])), 1, 0, 'C')
         pdf.cell(30, 8, f"{row['Price']:.2f}", 1, 0, 'R')
         pdf.cell(30, 8, f"{line_total:.2f}", 1, 1, 'R')
         
-    tva_rate = invoice_data['tva_rate'] # 这里的 rate 已经是小数了 (如 0.20)
+    tva_rate = invoice_data['tva_rate']
     total_tva = total_ht * tva_rate
     total_ttc = total_ht + total_tva
     
     pdf.ln(5)
     pdf.cell(130, 8, "", 0)
-    pdf.cell(30, 8, "Total HT:", 1)
+    pdf.cell(30, 8, clean("Total HT:"), 1)
     pdf.cell(30, 8, f"{total_ht:.2f} EUR", 1, 1, 'R')
     pdf.cell(130, 8, "", 0)
-    pdf.cell(30, 8, f"TVA ({tva_rate*100:.1f}%):", 1) # 显示小数点后一位
+    pdf.cell(30, 8, f"TVA ({tva_rate*100:.1f}%):", 1)
     pdf.cell(30, 8, f"{total_tva:.2f} EUR", 1, 1, 'R')
     pdf.cell(130, 8, "", 0)
     pdf.set_font("Arial", 'B', 10)
-    pdf.cell(30, 8, "Total TTC:", 1)
+    pdf.cell(30, 8, clean("Total TTC:"), 1)
     pdf.cell(30, 8, f"{total_ttc:.2f} EUR", 1, 1, 'R')
     
     pdf.ln(10)
     pdf.set_font("Arial", 'I', 9)
-    # 处理多行法律条款，防止乱码
-    legal_text = invoice_data['legal_text'].encode('latin-1', 'replace').decode('latin-1')
-    pdf.multi_cell(0, 5, f"Mentions Legales: {legal_text}")
+    # 清洗法律条款
+    pdf.multi_cell(0, 5, clean(f"Mentions Legales: {invoice_data['legal_text']}"))
     
-    return pdf.output(dest='S').encode('latin-1')
-
+    # 最后的输出加上 errors='ignore' 彻底防止崩溃
+    return pdf.output(dest='S').encode('latin-1', 'ignore')
 # ================= 侧边栏导航 =================
 menu = st.sidebar.radio("功能导航", ["📝 创建发票", "📊 仪表盘", "👥 客户管理", "📦 产品库"])
 
