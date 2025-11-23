@@ -169,4 +169,113 @@ if menu == "📝 创建发票":
     
     with c_tax2:
         # 法律条款输入框 (文本域)
-        user_legal_text = st.text_area("法律条款 /
+        user_legal_text = st.text_area("法律条款 / Mentions Légales", 
+                                       value=default_legal_text, 
+                                       height=68)
+
+    st.divider()
+    
+    # === 购物车逻辑 ===
+    if 'cart' not in st.session_state:
+        st.session_state['cart'] = pd.DataFrame(columns=["SKU", "Desc", "Price", "Quantity"])
+
+    st.subheader("商品明细")
+    if df_products.empty:
+        st.warning("请先去【产品库】添加产品。")
+    else:
+        c1, c2, c3 = st.columns([2, 1, 1])
+        with c1:
+            prod_select = st.selectbox("选择产品", df_products['Desc'])
+        with c2:
+            qty = st.number_input("数量", min_value=1, value=1)
+        with c3:
+            if st.button("➕ 添加"):
+                prod_info = df_products[df_products['Desc'] == prod_select].iloc[0]
+                new_row = {"SKU": prod_info['SKU'], "Desc": prod_info['Desc'], "Price": prod_info['Price'], "Quantity": qty}
+                st.session_state['cart'] = pd.concat([st.session_state['cart'], pd.DataFrame([new_row])], ignore_index=True)
+
+    if not st.session_state['cart'].empty:
+        st.dataframe(st.session_state['cart'], use_container_width=True)
+        
+        # 计算金额 (使用用户输入的税率)
+        real_tva_rate = user_tva_percent / 100.0
+        
+        total_ht = (st.session_state['cart']['Price'] * st.session_state['cart']['Quantity']).sum()
+        total_tva = total_ht * real_tva_rate
+        total_ttc = total_ht + total_tva
+        
+        c_tot1, c_tot2, c_tot3 = st.columns(3)
+        c_tot1.metric("Total HT", f"€ {total_ht:.2f}")
+        c_tot2.metric(f"TVA ({user_tva_percent}%)", f"€ {total_tva:.2f}")
+        c_tot3.metric("Total TTC", f"€ {total_ttc:.2f}")
+        
+        # 写入与生成
+        if st.button("✅ 确认开票 (同步到云端)", type="primary"):
+            try:
+                # 1. 准备新数据
+                new_inv = pd.DataFrame([{
+                    "InvoiceNo": inv_no,
+                    "Date": str(inv_date),
+                    "Client": selected_client_name,
+                    "Total_HT": total_ht,
+                    "Total_TTC": total_ttc,
+                    "Status": "Sent"
+                }])
+                
+                # 2. 读取云端
+                current_invoices_cloud = conn.read(worksheet="invoices", ttl=0)
+                updated_df = pd.concat([current_invoices_cloud, new_inv], ignore_index=True)
+                
+                # 3. 写入
+                conn.update(worksheet="invoices", data=updated_df)
+                
+                # 4. 生成 PDF (传入用户自定义的 税率 和 条款)
+                pdf_bytes = create_pdf({
+                    "no": inv_no, "date": inv_date, 
+                    "client_name": selected_client_name, "client_addr": client_data['Address'], "client_vat": client_data['VAT'],
+                    "tva_rate": real_tva_rate,      # <--- 使用自定义税率
+                    "legal_text": user_legal_text   # <--- 使用自定义条款
+                }, st.session_state['cart'])
+                
+                st.cache_data.clear()
+                
+                # 5. 下载
+                b64 = base64.b64encode(pdf_bytes).decode()
+                href = f'<a href="data:application/octet-stream;base64,{b64}" download="{inv_no}.pdf">📥 点击下载 PDF 发票</a>'
+                st.markdown(href, unsafe_allow_html=True)
+                st.success("🎉 开票成功！云端已更新。")
+                
+                st.session_state['cart'] = pd.DataFrame(columns=["SKU", "Desc", "Price", "Quantity"])
+                
+            except Exception as e:
+                st.error(f"写入失败，请重试。错误: {e}")
+
+# ================= 页面 2: 仪表盘 =================
+elif menu == "📊 仪表盘":
+    st.title("业务概览")
+    df = df_invoices
+    if df.empty:
+        st.warning("暂无数据。")
+    else:
+        k1, k2, k3 = st.columns(3)
+        k1.metric("总营收 (HT)", f"€ {df['Total_HT'].sum():.2f}")
+        k2.metric("开票数量", len(df))
+        k3.metric("平均单价", f"€ {df['Total_HT'].mean():.2f}")
+        st.dataframe(df, use_container_width=True)
+
+# ================= 页面 3 & 4 (编辑功能) =================
+elif menu == "👥 客户管理":
+    st.title("客户数据库")
+    edited_clients = st.data_editor(df_clients, num_rows="dynamic", use_container_width=True)
+    if st.button("💾 保存客户变更"):
+        conn.update(worksheet="clients", data=edited_clients)
+        st.cache_data.clear()
+        st.success("已保存！")
+
+elif menu == "📦 产品库":
+    st.title("产品管理")
+    edited_products = st.data_editor(df_products, num_rows="dynamic", use_container_width=True)
+    if st.button("💾 保存产品变更"):
+        conn.update(worksheet="products", data=edited_products)
+        st.cache_data.clear()
+        st.success("已保存！")
